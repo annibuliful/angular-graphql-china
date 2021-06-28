@@ -1,4 +1,8 @@
-const { ApolloServer, gql } = require("apollo-server");
+const { ApolloServer, gql, PubSub, withFilter } = require("apollo-server");
+
+const pubsub = new PubSub();
+
+const CREATE_BOOK = "CREATE_BOOK_TOPIC";
 
 const books = [
   {
@@ -54,6 +58,11 @@ const typeDefs = gql`
     comments(isGood: Boolean): [Comment]
   }
 
+  type Subscription {
+    bookCreated: Book
+    bookCreatedWithFilter(isEven: Boolean): Book
+  }
+
   # The "Query" type is special: it lists all of the available queries that
   # clients can execute, along with the return type for each. In this
   # case, the "books" query returns an array of zero or more Books (defined above).
@@ -80,8 +89,14 @@ const resolvers = {
     createBook: (_, { input }) => {
       console.log(input);
       const id = books.length + 1;
-      books.push({ ...input, id });
-
+      const data = { ...input, id };
+      books.push(data);
+      // pubsub.publish(CREATE_BOOK, {
+      //   bookCreated: data,
+      // });
+      pubsub.publish(CREATE_BOOK, {
+        bookCreatedWithFilter: data,
+      });
       return books[books.length - 1];
     },
   },
@@ -94,11 +109,31 @@ const resolvers = {
       );
     },
   },
+  Subscription: {
+    bookCreated: {
+      subscribe: () => pubsub.asyncIterator([CREATE_BOOK]),
+    },
+    bookCreatedWithFilter: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterator([CREATE_BOOK]),
+        (payload, variable) => {
+          console.log("payload", payload);
+          console.log("variable", variable);
+          return isEven(payload.bookCreatedWithFilter.id) === variable.isEven;
+        }
+      ),
+    },
+  },
 };
+
+const isEven = (number) => number % 2 === 0;
 
 // The ApolloServer constructor requires two parameters: your schema
 // definition and your set of resolvers.
-const server = new ApolloServer({ typeDefs, resolvers });
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+});
 
 // The `listen` method launches a web server.
 server.listen().then(({ url }) => {
